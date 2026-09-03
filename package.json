@@ -1,0 +1,51 @@
+{
+  "name": "myrouter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenRouter-style LLM gateway MVP: one OpenAI-compatible endpoint routed to OpenAI, Anthropic, and Google Gemini.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/src/main.js",
+    "start:dev": "tsx watch src/main.ts",
+    "migrate": "tsx src/database/migrate.ts",
+    "db:generate": "drizzle-kit generate",
+    "key:create": "tsx scripts/create-api-key.ts",
+    "test": "jest",
+    "test:e2e": "jest -c test/jest-e2e.config.ts",
+    "test:db": "jest -c test/jest-db.config.ts",
+    "test:all": "npm run test && npm run test:e2e"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.123.0",
+    "@google/genai": "^2.21.0",
+    "@nestjs/common": "^11.2.3",
+    "@nestjs/core": "^11.2.3",
+    "@nestjs/platform-express": "^11.2.3",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "openai": "^7.9.0",
+    "pg": "^8.23.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^11.2.3",
+    "@types/express": "^5.0.6",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.13.3",
+    "@types/pg": "^8.23.1",
+    "@types/supertest": "^7.2.1",
+    "drizzle-kit": "^0.31.10",
+    "jest": "^30.5.1",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.4.12",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3"
+  }
+}
