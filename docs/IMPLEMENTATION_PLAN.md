@@ -1,6 +1,6 @@
 # Implementation Plan: LLM Router MVP
 
-Source: `PROJECT_SPEC.md` (revision of 2026-09-03 18:15). Repository state at planning time: empty apart from the spec. No existing code, config, or conventions to honor, so every choice below is fresh and follows the spec's principle of explicit, simple code.
+Source: `docs/PROJECT_SPEC.md` (revision of 2026-09-03 18:15). Repository state at planning time: empty apart from the spec. No existing code, config, or conventions to honor, so every choice below is fresh and follows the spec's principle of explicit, simple code.
 
 Amendments accepted on 2026-09-03 before implementation, from two review rounds:
 
