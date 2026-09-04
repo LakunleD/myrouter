@@ -1,6 +1,6 @@
 # myrouter
 
-An OpenRouter-style LLM gateway. One OpenAI-compatible endpoint, `POST /v1/chat/completions`, routes chat requests to OpenAI, Anthropic, or Google Gemini based on the requested model, with API key authentication, two-attempt fallback, SSE streaming, and per-request usage tracking in PostgreSQL.
+An OpenRouter-style LLM gateway. One OpenAI-compatible endpoint, `POST /v1/chat/completions`, routes chat requests to OpenAI, Anthropic, or Google Gemini based on the requested model, with API key authentication, two-attempt fallback, and per-request usage tracking in PostgreSQL. SSE streaming is the next phase; see the status table.
 
 Design and build order live in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). The original brief is [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md).
 

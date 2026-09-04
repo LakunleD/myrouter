@@ -94,6 +94,10 @@ export class RouterExceptionFilter implements ExceptionFilter {
 
     if (normalized.code === ErrorCode.INTERNAL_ERROR) {
       this.logger.error({ request_id: requestId, msg: 'Unhandled error', err: describeError(exception) });
+    } else if (exception instanceof RouterError && exception.upstreamStatus !== undefined) {
+      // A provider rejected or failed the request (4xx, 429, 5xx). The client sees a sanitised
+      // message, so the upstream status and cause are logged here for diagnosis.
+      this.logger.warn({ request_id: requestId, msg: 'Upstream provider error', err: describeError(exception) });
     }
 
     if (res.headersSent) {

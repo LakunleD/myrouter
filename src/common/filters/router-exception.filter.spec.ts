@@ -1,7 +1,7 @@
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { ArgumentsHost, BadRequestException, Logger, UnauthorizedException } from '@nestjs/common';
 import { ErrorCode } from '../errors/error-code';
 import { RouterError } from '../errors/router-error';
-import { describeError, errorBody, normalizeError } from './router-exception.filter';
+import { describeError, errorBody, normalizeError, RouterExceptionFilter } from './router-exception.filter';
 
 describe('normalizeError', () => {
   it('uses the RouterError code and status', () => {
@@ -36,6 +36,51 @@ describe('errorBody', () => {
     expect(body).toEqual({
       error: { message: 'nope', type: 'model_not_found', code: 'model_not_found', request_id: 'lr_req_1' },
     });
+  });
+});
+
+describe('RouterExceptionFilter logging', () => {
+  function run(exception: unknown): { warn: jest.SpyInstance; error: jest.SpyInstance; json: jest.Mock } {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const json = jest.fn();
+    const res = { headersSent: false, status: jest.fn(() => ({ json })), end: jest.fn() };
+    const host = {
+      switchToHttp: () => ({ getRequest: () => ({ requestId: 'lr_req_1' }), getResponse: () => res }),
+    } as unknown as ArgumentsHost;
+    new RouterExceptionFilter().catch(exception, host);
+    return { warn, error, json };
+  }
+
+  it('warns with upstream details when a provider rejected the request', () => {
+    const upstream = Object.assign(new Error('Unsupported parameter: max_tokens'), { status: 400 });
+    const { warn, error, json } = run(
+      new RouterError(ErrorCode.INVALID_REQUEST, 'Upstream provider rejected the request', {
+        provider: 'openai',
+        upstreamStatus: 400,
+        cause: upstream,
+      }),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request_id: 'lr_req_1',
+        err: expect.objectContaining({ provider: 'openai', upstream_status: 400, cause: expect.objectContaining({ message: 'Unsupported parameter: max_tokens' }) }),
+      }),
+    );
+    expect(error).not.toHaveBeenCalled();
+    expect(json).toHaveBeenCalledWith(expect.objectContaining({ error: expect.objectContaining({ code: 'invalid_request' }) }));
+  });
+
+  it('does not warn for local validation and routing errors', () => {
+    const { warn, error } = run(new RouterError(ErrorCode.MODEL_NOT_FOUND, "Model 'x' not found"));
+    expect(warn).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('logs internal errors at error level only', () => {
+    const { warn, error } = run(new RouterError(ErrorCode.INTERNAL_ERROR, undefined, { upstreamStatus: 401 }));
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 
