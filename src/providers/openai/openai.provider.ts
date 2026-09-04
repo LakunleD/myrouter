@@ -1,8 +1,8 @@
 import type OpenAI from 'openai';
 import type { LLMProvider } from '../llm-provider.interface';
 import { mapProviderError } from '../provider-error';
-import type { UnifiedChatRequest, UnifiedChatResponse, UnifiedStreamChunk } from '../unified.types';
-import { fromOpenAIResponse, toOpenAIRequest } from './openai.mapper';
+import type { FinishReason, UnifiedChatRequest, UnifiedChatResponse, UnifiedStreamChunk, UnifiedUsage } from '../unified.types';
+import { fromOpenAIResponse, mapOpenAIFinishReason, toOpenAIRequest, toOpenAIStreamRequest } from './openai.mapper';
 
 export class OpenAIProvider implements LLMProvider {
   readonly name = 'openai' as const;
@@ -18,7 +18,28 @@ export class OpenAIProvider implements LLMProvider {
     }
   }
 
-  async *stream(_request: UnifiedChatRequest): AsyncIterable<UnifiedStreamChunk> {
-    throw new Error('OpenAI streaming is implemented in Phase 6');
+  async *stream(request: UnifiedChatRequest): AsyncIterable<UnifiedStreamChunk> {
+    try {
+      const stream = await this.client.chat.completions.create(toOpenAIStreamRequest(request), { signal: request.signal });
+      let finishReason: FinishReason = 'stop';
+      let usage: UnifiedUsage | null = null;
+      for await (const chunk of stream) {
+        const choice = chunk.choices[0];
+        if (typeof choice?.delta.content === 'string' && choice.delta.content.length > 0) {
+          yield { type: 'delta', text: choice.delta.content };
+        }
+        if (choice?.finish_reason) finishReason = mapOpenAIFinishReason(choice.finish_reason);
+        if (chunk.usage) {
+          usage = {
+            promptTokens: chunk.usage.prompt_tokens,
+            completionTokens: chunk.usage.completion_tokens,
+            totalTokens: chunk.usage.total_tokens,
+          };
+        }
+      }
+      yield { type: 'finish', finishReason, usage };
+    } catch (error) {
+      throw mapProviderError(error);
+    }
   }
 }

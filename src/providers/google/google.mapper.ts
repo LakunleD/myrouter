@@ -33,15 +33,19 @@ export function fromGoogleResponse(response: GenerateContentResponse): UnifiedCh
   const completionTokens = metadata?.candidatesTokenCount ?? 0;
   return {
     content: response.text ?? '',
-    finishReason: blocked || reason === 'SAFETY' || reason === 'BLOCKLIST' || reason === 'PROHIBITED_CONTENT'
-      ? 'content_filter'
-      : reason === 'MAX_TOKENS'
-        ? 'length'
-        : 'stop',
+    finishReason: mapGoogleFinishReason(response),
     usage: metadata
       ? { promptTokens, completionTokens, totalTokens: metadata.totalTokenCount ?? promptTokens + completionTokens }
       : null,
   };
+}
+
+export function mapGoogleFinishReason(response: GenerateContentResponse): UnifiedChatResponse['finishReason'] {
+  const reason = response.candidates?.[0]?.finishReason;
+  const blocked = response.promptFeedback?.blockReason !== undefined;
+  if (blocked || reason === 'SAFETY' || reason === 'BLOCKLIST' || reason === 'PROHIBITED_CONTENT') return 'content_filter';
+  if (reason === 'MAX_TOKENS') return 'length';
+  return 'stop';
 }
 
 function compact<T extends object>(value: T): T {

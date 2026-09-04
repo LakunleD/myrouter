@@ -1,4 +1,4 @@
-import type { Message, MessageCreateParamsNonStreaming, MessageParam } from '@anthropic-ai/sdk/resources/messages';
+import type { Message, MessageCreateParamsNonStreaming, MessageCreateParamsStreaming, MessageParam, StopReason } from '@anthropic-ai/sdk/resources/messages';
 import type { UnifiedChatRequest, UnifiedChatResponse } from '../unified.types';
 
 export function toAnthropicRequest(request: UnifiedChatRequest): MessageCreateParamsNonStreaming {
@@ -18,6 +18,16 @@ export function toAnthropicRequest(request: UnifiedChatRequest): MessageCreatePa
   }) as MessageCreateParamsNonStreaming;
 }
 
+export function toAnthropicStreamRequest(request: UnifiedChatRequest): MessageCreateParamsStreaming {
+  return { ...toAnthropicRequest(request), stream: true };
+}
+
+export function mapAnthropicFinishReason(reason: StopReason | null): UnifiedChatResponse['finishReason'] {
+  if (reason === 'max_tokens') return 'length';
+  if (reason === 'refusal') return 'content_filter';
+  return 'stop';
+}
+
 export function fromAnthropicResponse(response: Message): UnifiedChatResponse {
   const content = response.content
     .filter((block): block is Extract<(typeof response.content)[number], { type: 'text' }> => block.type === 'text')
@@ -27,7 +37,7 @@ export function fromAnthropicResponse(response: Message): UnifiedChatResponse {
   const output = response.usage.output_tokens;
   return {
     content,
-    finishReason: response.stop_reason === 'max_tokens' ? 'length' : response.stop_reason === 'refusal' ? 'content_filter' : 'stop',
+    finishReason: mapAnthropicFinishReason(response.stop_reason),
     usage: { promptTokens: input, completionTokens: output, totalTokens: input + output },
   };
 }

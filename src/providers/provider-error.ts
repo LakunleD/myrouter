@@ -7,6 +7,7 @@ interface ErrorLike {
   code?: unknown;
   name?: unknown;
   cause?: unknown;
+  type?: unknown;
 }
 
 const CONNECTION_CODES = new Set([
@@ -41,6 +42,27 @@ export function mapProviderError(error: unknown): RouterError {
     return new RouterError(ErrorCode.PROVIDER_UNAVAILABLE, undefined, options);
   }
   if (status === 401 || status === 403) return new RouterError(ErrorCode.INTERNAL_ERROR, undefined, options);
+
+  // SSE `error` events become APIError instances without an HTTP status in both the
+  // Anthropic and OpenAI SDKs. Anthropic classifies by `type`; OpenAI uses `type`
+  // for server failures and `code` for rate limits, and HTTP 429 quota errors that
+  // arrive statusless mid-stream carry `type: insufficient_quota`.
+  const upstreamType = typeof candidate.type === 'string' ? candidate.type : undefined;
+  const upstreamCode = typeof candidate.code === 'string' ? candidate.code : undefined;
+  if (upstreamType === 'rate_limit_error' || upstreamType === 'insufficient_quota' || upstreamCode === 'rate_limit_exceeded') {
+    return new RouterError(ErrorCode.PROVIDER_RATE_LIMITED, undefined, options);
+  }
+  if (upstreamType === 'overloaded_error' || upstreamType === 'api_error' || upstreamType === 'server_error') {
+    return new RouterError(ErrorCode.PROVIDER_UNAVAILABLE, undefined, options);
+  }
+  if (upstreamType === 'timeout_error') return new RouterError(ErrorCode.PROVIDER_TIMEOUT, undefined, options);
+  if (upstreamType === 'invalid_request_error') {
+    return new RouterError(ErrorCode.INVALID_REQUEST, 'Upstream provider rejected the request', options);
+  }
+  if (upstreamType === 'not_found_error') return new RouterError(ErrorCode.MODEL_NOT_FOUND, 'Upstream model not found', options);
+  if (upstreamType === 'authentication_error' || upstreamType === 'permission_error' || upstreamType === 'billing_error') {
+    return new RouterError(ErrorCode.INTERNAL_ERROR, undefined, options);
+  }
 
   // Check the timeout name before the connection name: the SDKs' timeout error extends their connection error.
   if (TIMEOUT_NAMES.has(nameOf(candidate))) {

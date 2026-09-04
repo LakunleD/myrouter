@@ -1,6 +1,6 @@
 # myrouter
 
-An OpenRouter-style LLM gateway. One OpenAI-compatible endpoint, `POST /v1/chat/completions`, routes chat requests to OpenAI, Anthropic, or Google Gemini based on the requested model, with API key authentication, two-attempt fallback, and per-request usage tracking in PostgreSQL. SSE streaming is the next phase; see the status table.
+An OpenRouter-style LLM gateway. One OpenAI-compatible endpoint, `POST /v1/chat/completions`, routes chat requests to OpenAI, Anthropic, or Google Gemini based on the requested model, with API key authentication, two-attempt fallback, SSE streaming, and per-request usage tracking in PostgreSQL.
 
 Design and build order live in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). The original brief is [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md).
 
@@ -13,11 +13,11 @@ Design and build order live in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION
 | 3 | Model registry, provider registry, routing, fallback | done |
 | 4 | Provider adapters and the chat endpoint (non-streaming) | done |
 | 5 | Usage tracking and fallback end to end | done |
-| 6 | Streaming | pending |
+| 6 | Streaming | done |
 | 7 | Dockerfile, Compose app service, final test run | pending |
 
-The available routes are `GET /health` and non-streaming `POST /v1/chat/completions`, with `models`
-fallback and usage persistence. SSE streaming lands in phase 6.
+The available routes are `GET /health` and `POST /v1/chat/completions`, with `model` or ordered `models`
+fallback, usage persistence, and SSE streaming via `"stream": true`.
 
 ## Stack
 
@@ -29,7 +29,7 @@ Requires Node 22 or newer and Docker.
 
 ```bash
 npm install
-cp .env.example .env            # fill in provider keys when you reach phase 4
+cp .env.example .env            # fill in the provider keys you want to enable
 docker compose up -d postgres
 npm run migrate
 npm run key:create -- --name "local dev"

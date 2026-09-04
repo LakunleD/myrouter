@@ -1,4 +1,4 @@
-import type { ChatCompletion, ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions';
+import type { ChatCompletion, ChatCompletionCreateParamsNonStreaming, ChatCompletionCreateParamsStreaming } from 'openai/resources/chat/completions';
 import type { UnifiedChatRequest, UnifiedChatResponse } from '../unified.types';
 
 /**
@@ -15,6 +15,10 @@ export function toOpenAIRequest(request: UnifiedChatRequest): ChatCompletionCrea
     stop: request.stop,
     stream: false,
   }) as ChatCompletionCreateParamsNonStreaming;
+}
+
+export function toOpenAIStreamRequest(request: UnifiedChatRequest): ChatCompletionCreateParamsStreaming {
+  return { ...toOpenAIRequest(request), stream: true, stream_options: { include_usage: true } };
 }
 
 export function fromOpenAIResponse(response: ChatCompletion): UnifiedChatResponse {

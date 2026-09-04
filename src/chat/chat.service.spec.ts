@@ -3,21 +3,74 @@ import { ClientDisconnected } from '../common/errors/client-disconnected';
 import { ErrorCode } from '../common/errors/error-code';
 import { RouterError } from '../common/errors/router-error';
 import type { RoutingResult, RoutingService } from '../routing/routing.service';
+import type { Response } from 'express';
 import type { UsageService } from '../usage/usage.service';
 import { ChatService } from './chat.service';
 import type { ChatCompletionRequestDto } from './dto/chat-completion-request.dto';
+import type { SseWriter } from './sse-writer';
 
 const context = { requestId: 'lr_req_1', apiKeyId: 'key-1' };
 const dto = { model: 'openai/gpt-5', messages: [{ role: 'user', content: 'hi' }], stream: false } as ChatCompletionRequestDto;
 
 function build(execute: jest.Mock): { service: ChatService; record: jest.Mock } {
   const record = jest.fn().mockResolvedValue(undefined);
-  const service = new ChatService({ execute } as unknown as RoutingService, { record } as unknown as UsageService);
+  const service = new ChatService(
+    { execute } as unknown as RoutingService,
+    { record } as unknown as UsageService,
+    {} as SseWriter,
+  );
   return { service, record };
 }
 
 beforeEach(() => {
   jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+  jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+  jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+});
+
+describe('ChatService.stream', () => {
+  function streamingService(chunks: () => AsyncGenerator, sseOverrides: Partial<SseWriter> = {}) {
+    const record = jest.fn().mockResolvedValue(undefined);
+    const executeStream = jest.fn().mockResolvedValue({
+      publicModel: 'openai/gpt-5', provider: 'openai', attempts: 1, chunks: chunks(),
+    });
+    const sse = {
+      start: jest.fn(), data: jest.fn().mockResolvedValue(undefined),
+      done: jest.fn().mockResolvedValue(undefined), error: jest.fn().mockResolvedValue(undefined),
+      ...sseOverrides,
+    } as unknown as SseWriter;
+    const service = new ChatService(
+      { executeStream } as unknown as RoutingService,
+      { record } as unknown as UsageService,
+      sse,
+    );
+    const response = { end: jest.fn() } as unknown as Response;
+    return { service, record, sse, response };
+  }
+
+  it('writes a committed error frame before recording the failure', async () => {
+    const failure = new RouterError(ErrorCode.PROVIDER_UNAVAILABLE, undefined, { provider: 'openai', model: 'openai/gpt-5' });
+    const fixture = streamingService(async function* () {
+      yield { type: 'delta' as const, text: 'partial' };
+      throw failure;
+    });
+    await fixture.service.stream({ ...dto, stream: true }, context, fixture.response);
+    expect(fixture.sse.error).toHaveBeenCalledWith(fixture.response, failure, 'lr_req_1');
+    expect(fixture.record).toHaveBeenCalledTimes(1);
+    expect((fixture.sse.error as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan(fixture.record.mock.invocationCallOrder[0]);
+    expect(fixture.record).toHaveBeenCalledWith(expect.objectContaining({ status: 'error:provider_unavailable' }));
+  });
+
+  it('records a mid-stream disconnect exactly once and sends no error frame', async () => {
+    const fixture = streamingService(async function* () {
+      yield { type: 'delta' as const, text: 'partial' };
+      throw new ClientDisconnected();
+    });
+    await fixture.service.stream({ ...dto, stream: true }, context, fixture.response);
+    expect(fixture.record).toHaveBeenCalledTimes(1);
+    expect(fixture.record).toHaveBeenCalledWith(expect.objectContaining({ status: 'client_disconnect' }));
+    expect(fixture.sse.error).not.toHaveBeenCalled();
+  });
 });
 
 describe('ChatService.complete', () => {

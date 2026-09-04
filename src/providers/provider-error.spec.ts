@@ -43,6 +43,34 @@ describe('mapProviderError', () => {
     });
   });
 
+  it.each([
+    ['rate_limit_error', ErrorCode.PROVIDER_RATE_LIMITED],
+    ['overloaded_error', ErrorCode.PROVIDER_UNAVAILABLE],
+    ['api_error', ErrorCode.PROVIDER_UNAVAILABLE],
+    ['timeout_error', ErrorCode.PROVIDER_TIMEOUT],
+    ['invalid_request_error', ErrorCode.INVALID_REQUEST],
+    ['not_found_error', ErrorCode.MODEL_NOT_FOUND],
+    ['authentication_error', ErrorCode.INTERNAL_ERROR],
+  ])('maps statusless Anthropic SSE error type %s', (type, code) => {
+    expect(mapProviderError({ name: 'APIError', type })).toMatchObject({ code });
+  });
+
+  it.each([
+    [{ type: 'server_error' }, ErrorCode.PROVIDER_UNAVAILABLE],
+    [{ type: 'requests', code: 'rate_limit_exceeded' }, ErrorCode.PROVIDER_RATE_LIMITED],
+    [{ type: 'tokens', code: 'rate_limit_exceeded' }, ErrorCode.PROVIDER_RATE_LIMITED],
+    [{ type: 'insufficient_quota' }, ErrorCode.PROVIDER_RATE_LIMITED],
+  ])('maps statusless OpenAI stream error %j', (shape, code) => {
+    const error = mapProviderError({ name: 'APIError', ...shape });
+    expect(error).toMatchObject({ code, retryable: true });
+  });
+
+  it('does not treat an unrelated string code as retryable', () => {
+    expect(mapProviderError({ name: 'APIError', type: 'requests', code: 'context_length_exceeded' })).toMatchObject({
+      code: ErrorCode.INTERNAL_ERROR,
+    });
+  });
+
   it('passes RouterErrors through untouched', () => {
     const original = mapProviderError({ status: 429 });
     expect(mapProviderError(original)).toBe(original);

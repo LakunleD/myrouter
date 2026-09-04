@@ -2,6 +2,8 @@ import { INestApplication } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import { request as httpRequest } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { AppModule } from '../src/app.module';
 import { ApiKeyService } from '../src/auth/api-key.service';
 import { ErrorCode } from '../src/common/errors/error-code';
@@ -9,7 +11,7 @@ import { RouterError } from '../src/common/errors/router-error';
 import { configureApp } from '../src/main';
 import { ProviderRegistry } from '../src/providers/provider-registry';
 import { UsageService } from '../src/usage/usage.service';
-import { FakeProvider, okResponse } from './fake-provider';
+import { FakeProvider, okChunks, okResponse } from './fake-provider';
 
 const AUTH = { Authorization: 'Bearer lr_valid' };
 const USER = [{ role: 'user', content: 'hi' }];
@@ -33,6 +35,7 @@ describe('POST /v1/chat/completions', () => {
     configureApp(expressApp);
     app = expressApp;
     await app.init();
+    await app.listen(0, '127.0.0.1');
   });
 
   beforeEach(() => {
@@ -75,10 +78,6 @@ describe('POST /v1/chat/completions', () => {
       expect(response.body.error.message).toBe('Maximum of 2 models allowed');
     });
 
-    it('rejects streaming until phase 6', async () => {
-      const response = await post({ model: 'openai/gpt-5', messages: USER, stream: true }).expect(400);
-      expect(response.body.error.code).toBe('invalid_request');
-    });
   });
 
   describe('single model', () => {
@@ -172,4 +171,77 @@ describe('POST /v1/chat/completions', () => {
       expect(record).toHaveBeenCalledWith(expect.objectContaining({ model: 'openai/gpt-5', status: 'error:provider_timeout' }));
     });
   });
+
+  describe('streaming', () => {
+    it('writes role, delta, finish, usage, and DONE frames', async () => {
+      openai.script([{ chunks: okChunks('hello') }]);
+      const response = await post({ model: 'openai/gpt-5', messages: USER, stream: true }).expect(200);
+      expect(response.headers['content-type']).toContain('text/event-stream');
+      expect(response.text).toContain('"role":"assistant"');
+      expect(response.text).toContain('"content":"hello"');
+      expect(response.text).toContain('"finish_reason":"stop"');
+      expect(response.text).toContain('"prompt_tokens":3');
+      expect(response.text).toContain('data: [DONE]');
+      expect(record).toHaveBeenCalledWith(expect.objectContaining({ status: 'success', model: 'openai/gpt-5' }));
+    });
+
+    it('falls back before the first chunk without committing the failed attempt', async () => {
+      anthropic.script([{ error: new RouterError(ErrorCode.PROVIDER_UNAVAILABLE) }]);
+      openai.script([{ chunks: okChunks('fallback') }]);
+      const response = await post({ models: ['anthropic/claude-sonnet', 'openai/gpt-5'], messages: USER, stream: true }).expect(200);
+      expect(response.text).toContain('"model":"openai/gpt-5"');
+      expect(response.text).toContain('"content":"fallback"');
+      expect(record).toHaveBeenCalledWith(expect.objectContaining({ model: 'openai/gpt-5', status: 'success' }));
+    });
+
+    it('returns a normal JSON error when the first stream attempt fails without fallback', async () => {
+      openai.script([{ error: new RouterError(ErrorCode.PROVIDER_RATE_LIMITED, undefined, { upstreamStatus: 429 }) }]);
+      const response = await post({ model: 'openai/gpt-5', messages: USER, stream: true }).expect(429);
+      expect(response.headers['content-type']).toContain('application/json');
+      expect(response.body.error.code).toBe('provider_rate_limited');
+      expect(response.text).not.toContain('data:');
+      expect(record).toHaveBeenCalledWith(expect.objectContaining({ status: 'error:provider_rate_limited' }));
+    });
+
+    it('writes a normalized SSE error after the stream is committed', async () => {
+      openai.script([{ chunks: [{ type: 'delta', text: 'partial' }, new RouterError(ErrorCode.PROVIDER_UNAVAILABLE)] }]);
+      const response = await post({ model: 'openai/gpt-5', messages: USER, stream: true }).expect(200);
+      expect(response.text).toContain('"content":"partial"');
+      expect(response.text).toContain('"code":"provider_unavailable"');
+      expect(response.text).not.toContain('data: [DONE]');
+      expect(record).toHaveBeenCalledWith(expect.objectContaining({ status: 'error:provider_unavailable' }));
+    });
+
+    it('aborts and records client_disconnect when the client closes after the first frame', async () => {
+      openai.script([{ chunks: [{ type: 'delta', text: 'partial' }, { type: 'delta', text: '<hang>' }] }]);
+      const address = app.getHttpServer().address() as AddressInfo;
+      const body = JSON.stringify({ model: 'openai/gpt-5', messages: USER, stream: true });
+      await new Promise<void>((resolve, reject) => {
+        const outgoing = httpRequest({
+          host: '127.0.0.1', port: address.port, path: '/v1/chat/completions', method: 'POST',
+          headers: { ...AUTH, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+        });
+        outgoing.on('error', (error: NodeJS.ErrnoException) => {
+          if (error.code === 'ECONNRESET') resolve();
+          else reject(error);
+        });
+        outgoing.on('response', (incoming) => {
+          incoming.once('data', () => incoming.destroy());
+          incoming.once('close', resolve);
+        });
+        outgoing.end(body);
+      });
+      await waitUntil(() => record.mock.calls.some(([row]) => row.status === 'client_disconnect'));
+      expect(record).toHaveBeenCalledWith(expect.objectContaining({ status: 'client_disconnect' }));
+      expect(openai.streamsClosed).toBe(1);
+    });
+  });
 });
+
+async function waitUntil(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error('Timed out waiting for asynchronous stream cleanup');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}

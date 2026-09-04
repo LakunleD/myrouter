@@ -1,4 +1,5 @@
-import { Body, Controller, HttpCode, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiKeyGuard } from '../auth/api-key.guard';
 import { ErrorCode } from '../common/errors/error-code';
 import { RouterError } from '../common/errors/router-error';
@@ -14,8 +15,23 @@ export class ChatController {
 
   @Post('completions')
   @HttpCode(200)
-  complete(@Body() dto: ChatCompletionRequestDto, @Req() request: RouterRequest): Promise<OpenAIChatCompletion> {
-    return this.chat.complete(dto, contextFrom(request));
+  async complete(
+    @Body() dto: ChatCompletionRequestDto,
+    @Req() request: RouterRequest,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<OpenAIChatCompletion | void> {
+    const client = new AbortController();
+    const disconnect = (): void => {
+      if (!response.writableEnded) client.abort();
+    };
+    response.once('close', disconnect);
+    try {
+      const context = { ...contextFrom(request), clientSignal: client.signal };
+      if (dto.stream) return await this.chat.stream(dto, context, response);
+      return await this.chat.complete(dto, context);
+    } finally {
+      response.off('close', disconnect);
+    }
   }
 }
 
