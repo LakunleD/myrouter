@@ -3,11 +3,12 @@ import { AuthModule } from './auth/auth.module';
 import { ConfigModule } from './config/config.module';
 import { DatabaseModule } from './database/database.module';
 import { HealthController } from './health.controller';
+import { RoutingModule } from './routing/routing.module';
 import { RequestIdMiddleware } from './telemetry/request-id.middleware';
 import { TelemetryModule } from './telemetry/telemetry.module';
 
 @Module({
-  imports: [ConfigModule, TelemetryModule, DatabaseModule, AuthModule],
+  imports: [ConfigModule, TelemetryModule, DatabaseModule, AuthModule, RoutingModule],
   controllers: [HealthController],
 })
 export class AppModule implements NestModule {

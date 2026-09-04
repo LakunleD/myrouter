@@ -10,10 +10,10 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/src/main.js",
-    "start:dev": "tsx watch src/main.ts",
-    "migrate": "tsx src/database/migrate.ts",
+    "start:dev": "ts-node --transpile-only src/main.ts",
+    "migrate": "ts-node --transpile-only src/database/migrate.ts",
     "db:generate": "drizzle-kit generate",
-    "key:create": "tsx scripts/create-api-key.ts",
+    "key:create": "ts-node --transpile-only scripts/create-api-key.ts",
     "test": "jest",
     "test:e2e": "jest -c test/jest-e2e.config.ts",
     "test:db": "jest -c test/jest-db.config.ts",
@@ -45,7 +45,7 @@
     "jest": "^30.5.1",
     "supertest": "^7.2.2",
     "ts-jest": "^29.4.12",
-    "tsx": "^4.23.13",
+    "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }
 }

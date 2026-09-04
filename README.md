@@ -10,7 +10,7 @@ Design and build order live in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION
 |---|---|---|
 | 1 | Scaffold: config, errors, request IDs, health endpoint | done |
 | 2 | Database schema, migrations, API key auth, key script | done |
-| 3 | Model registry, provider registry, routing, fallback | pending |
+| 3 | Model registry, provider registry, routing, fallback | done |
 | 4 | Provider adapters and the chat endpoint (non-streaming) | pending |
 | 5 | Usage tracking and fallback end to end | pending |
 | 6 | Streaming | pending |
@@ -114,7 +114,7 @@ Every error, from any layer, has one shape:
 
 | Command | What it does |
 |---|---|
-| `npm run start:dev` | Run with live reload via tsx. |
+| `npm run start:dev` | Run from source with ts-node. It emits the decorator metadata Nest needs for injection; esbuild-based runners such as tsx do not. |
 | `npm run build` then `npm start` | Compile to `dist/` and run. |
 | `npm run typecheck` | Type-check without emitting. |
 | `npm test` | Unit tests (`src/**/*.spec.ts`). |
