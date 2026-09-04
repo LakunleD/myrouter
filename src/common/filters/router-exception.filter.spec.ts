@@ -1,7 +1,7 @@
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { ErrorCode } from '../errors/error-code';
 import { RouterError } from '../errors/router-error';
-import { errorBody, normalizeError } from './router-exception.filter';
+import { describeError, errorBody, normalizeError } from './router-exception.filter';
 
 describe('normalizeError', () => {
   it('uses the RouterError code and status', () => {
@@ -36,5 +36,33 @@ describe('errorBody', () => {
     expect(body).toEqual({
       error: { message: 'nope', type: 'model_not_found', code: 'model_not_found', request_id: 'lr_req_1' },
     });
+  });
+});
+
+describe('describeError', () => {
+  it('surfaces provider, upstream status, and the wrapped cause of a RouterError', () => {
+    const upstream = Object.assign(new Error('invalid x-api-key'), { status: 401, name: 'AuthenticationError' });
+    const error = new RouterError(ErrorCode.INTERNAL_ERROR, undefined, {
+      provider: 'anthropic',
+      model: 'anthropic/claude-sonnet',
+      upstreamStatus: 401,
+      cause: upstream,
+    });
+    expect(describeError(error)).toMatchObject({
+      code: ErrorCode.INTERNAL_ERROR,
+      provider: 'anthropic',
+      model: 'anthropic/claude-sonnet',
+      upstream_status: 401,
+      cause: { name: 'AuthenticationError', message: 'invalid x-api-key', status: 401 },
+    });
+  });
+
+  it('walks nested causes with a bound and keeps the stack only at the top', () => {
+    const inner = Object.assign(new Error('connect'), { code: 'ECONNREFUSED' });
+    const outer = new TypeError('fetch failed', { cause: inner });
+    const described = describeError(outer) as { stack?: string; cause: { code?: string; stack?: string } };
+    expect(described.stack).toBeDefined();
+    expect(described.cause).toMatchObject({ message: 'connect', code: 'ECONNREFUSED' });
+    expect(described.cause.stack).toBeUndefined();
   });
 });

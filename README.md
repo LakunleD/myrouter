@@ -11,12 +11,13 @@ Design and build order live in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION
 | 1 | Scaffold: config, errors, request IDs, health endpoint | done |
 | 2 | Database schema, migrations, API key auth, key script | done |
 | 3 | Model registry, provider registry, routing, fallback | done |
-| 4 | Provider adapters and the chat endpoint (non-streaming) | pending |
+| 4 | Provider adapters and the chat endpoint (non-streaming) | done |
 | 5 | Usage tracking and fallback end to end | pending |
 | 6 | Streaming | pending |
 | 7 | Dockerfile, Compose app service, final test run | pending |
 
-Until phase 4 lands, the only routes are `GET /health` and the normalized 404 for everything else.
+The available routes are `GET /health` and non-streaming `POST /v1/chat/completions`. Usage persistence,
+fallback request bodies, and SSE streaming land in phases 5 and 6.
 
 ## Stack
 
@@ -61,7 +62,7 @@ All configuration is environment variables. See [.env.example](.env.example).
 
 Never commit `.env` or provider credentials. `.gitignore` already excludes `.env`.
 
-## Public API (target shape)
+## Public API
 
 ```http
 POST /v1/chat/completions
@@ -85,7 +86,9 @@ Public model aliases resolve through the in-code registry to a provider and an u
 | `anthropic/claude-sonnet` | Anthropic |
 | `google/gemini-2.5-pro` | Google |
 
-Send `models` instead of `model` to request fallback. Up to two entries are tried in order; a third is rejected with 400. Fallback happens only on 429, 5xx, network errors, timeouts, and unconfigured providers. Validation errors, authentication errors, and safety refusals never fall back.
+Phase 4 accepts one `model`. The routing layer already supports two ordered attempts; the public `models`
+fallback request shape lands in phase 5. Fallback happens only on 429, 5xx, network errors, timeouts, and
+unconfigured providers. Validation errors, authentication errors, and safety refusals never fall back.
 
 Every error, from any layer, has one shape:
 
@@ -140,9 +143,9 @@ src/
 ├── database/               Drizzle schema, DatabaseModule, migration runner
 ├── auth/                   ApiKeyService, ApiKeyGuard
 ├── models/                 (phase 3) alias registry
-├── providers/              (phase 3-4) LLMProvider contract, adapters, ProviderRegistry
-├── routing/                (phase 3) RoutingService, FallbackService
-├── chat/                   (phase 4) controller, service, DTOs, SSE writer
+├── providers/              LLMProvider contract, three adapters, ProviderRegistry
+├── routing/                RoutingService, FallbackService
+├── chat/                   non-streaming controller, service, DTOs, response formatting
 └── usage/                  (phase 5) UsageService
 scripts/create-api-key.ts
 drizzle/                    committed SQL migrations

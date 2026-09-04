@@ -41,6 +41,37 @@ export function errorBody(normalized: NormalizedError, requestId: string): Error
   };
 }
 
+/**
+ * Log-safe view of a thrown value. For a RouterError it includes the provider,
+ * upstream status, and the wrapped cause's name and message, which is where a
+ * bad upstream credential or an unexpected SDK failure actually shows up.
+ */
+export function describeError(exception: unknown, depth = 0): unknown {
+  if (exception instanceof RouterError) {
+    return {
+      name: exception.name,
+      code: exception.code,
+      message: exception.message,
+      provider: exception.provider,
+      model: exception.model,
+      upstream_status: exception.upstreamStatus,
+      cause: exception.cause === undefined ? undefined : describeError(exception.cause, depth + 1),
+    };
+  }
+  if (exception instanceof Error) {
+    const withCode = exception as Error & { code?: unknown; status?: unknown };
+    return {
+      name: exception.name,
+      message: exception.message,
+      code: typeof withCode.code === 'string' ? withCode.code : undefined,
+      status: typeof withCode.status === 'number' ? withCode.status : undefined,
+      stack: depth === 0 ? exception.stack : undefined,
+      cause: exception.cause === undefined || depth >= 3 ? undefined : describeError(exception.cause, depth + 1),
+    };
+  }
+  return exception;
+}
+
 /** Renders every throwable in the one error shape. It never records usage; ChatService owns that. */
 @Catch()
 export class RouterExceptionFilter implements ExceptionFilter {
@@ -54,7 +85,7 @@ export class RouterExceptionFilter implements ExceptionFilter {
     const normalized = normalizeError(exception);
 
     if (normalized.code === ErrorCode.INTERNAL_ERROR) {
-      this.logger.error({ request_id: requestId, msg: 'Unhandled error', err: describe(exception) });
+      this.logger.error({ request_id: requestId, msg: 'Unhandled error', err: describeError(exception) });
     }
 
     if (res.headersSent) {
@@ -64,11 +95,4 @@ export class RouterExceptionFilter implements ExceptionFilter {
     }
     res.status(normalized.status).json(errorBody(normalized, requestId));
   }
-}
-
-function describe(exception: unknown): unknown {
-  if (exception instanceof Error) {
-    return { name: exception.name, message: exception.message, stack: exception.stack };
-  }
-  return exception;
 }
