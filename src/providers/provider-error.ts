@@ -1,0 +1,80 @@
+import { ErrorCode } from '../common/errors/error-code';
+import { RouterError } from '../common/errors/router-error';
+
+interface ErrorLike {
+  status?: unknown;
+  statusCode?: unknown;
+  code?: unknown;
+  name?: unknown;
+  cause?: unknown;
+}
+
+const CONNECTION_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ETIMEDOUT',
+  'EPIPE',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+
+/** Thrown by the OpenAI and Anthropic SDKs when their own request timeout fires. */
+const TIMEOUT_NAMES = new Set(['APIConnectionTimeoutError']);
+const CONNECTION_NAMES = new Set(['APIConnectionError', 'FetchError']);
+
+/** Maps SDK/HTTP failures into the router's provider-neutral error vocabulary. */
+export function mapProviderError(error: unknown): RouterError {
+  if (error instanceof RouterError) return error;
+
+  const candidate = asErrorLike(error);
+  const status = numeric(candidate.status) ?? numeric(candidate.statusCode);
+  const options = { upstreamStatus: status, cause: error };
+
+  if (status === 400 || status === 422) {
+    return new RouterError(ErrorCode.INVALID_REQUEST, 'Upstream provider rejected the request', options);
+  }
+  if (status === 404) return new RouterError(ErrorCode.MODEL_NOT_FOUND, 'Upstream model not found', options);
+  if (status === 429) return new RouterError(ErrorCode.PROVIDER_RATE_LIMITED, undefined, options);
+  if (status !== undefined && (status >= 500 || status === 408)) {
+    return new RouterError(ErrorCode.PROVIDER_UNAVAILABLE, undefined, options);
+  }
+  if (status === 401 || status === 403) return new RouterError(ErrorCode.INTERNAL_ERROR, undefined, options);
+
+  // Check the timeout name before the connection name: the SDKs' timeout error extends their connection error.
+  if (TIMEOUT_NAMES.has(nameOf(candidate))) {
+    return new RouterError(ErrorCode.PROVIDER_TIMEOUT, undefined, options);
+  }
+  if (CONNECTION_NAMES.has(nameOf(candidate)) || hasConnectionCode(candidate)) {
+    return new RouterError(ErrorCode.PROVIDER_UNAVAILABLE, undefined, options);
+  }
+  return new RouterError(ErrorCode.INTERNAL_ERROR, undefined, options);
+}
+
+/**
+ * Node's fetch reports network failures as `TypeError: fetch failed` with the
+ * ECONNREFUSED / ENOTFOUND code on `cause` (sometimes nested), so the chain is walked.
+ */
+function hasConnectionCode(error: ErrorLike): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth += 1) {
+    const { code, cause, errors } = current as ErrorLike & { errors?: unknown };
+    if (typeof code === 'string' && CONNECTION_CODES.has(code.toUpperCase())) return true;
+    if (Array.isArray(errors) && errors.some((inner) => hasConnectionCode(asErrorLike(inner)))) return true;
+    current = cause;
+  }
+  return false;
+}
+
+function asErrorLike(value: unknown): ErrorLike {
+  return typeof value === 'object' && value !== null ? (value as ErrorLike) : {};
+}
+
+function nameOf(error: ErrorLike): string {
+  return typeof error.name === 'string' ? error.name : '';
+}
+
+function numeric(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}

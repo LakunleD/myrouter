@@ -1,5 +1,6 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, Logger } from '@nestjs/common';
 import type { Response } from 'express';
+import { ClientDisconnected } from '../errors/client-disconnected';
 import { ErrorCode } from '../errors/error-code';
 import { RouterError } from '../errors/router-error';
 import type { RouterRequest } from '../router-request';
@@ -82,6 +83,13 @@ export class RouterExceptionFilter implements ExceptionFilter {
     const req = http.getRequest<RouterRequest>();
     const res = http.getResponse<Response>();
     const requestId = req.requestId ?? 'unknown';
+
+    if (exception instanceof ClientDisconnected) {
+      // Nobody is listening; ChatService has already recorded the outcome.
+      res.end();
+      return;
+    }
+
     const normalized = normalizeError(exception);
 
     if (normalized.code === ErrorCode.INTERNAL_ERROR) {

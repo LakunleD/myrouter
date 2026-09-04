@@ -12,12 +12,12 @@ Design and build order live in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION
 | 2 | Database schema, migrations, API key auth, key script | done |
 | 3 | Model registry, provider registry, routing, fallback | done |
 | 4 | Provider adapters and the chat endpoint (non-streaming) | done |
-| 5 | Usage tracking and fallback end to end | pending |
+| 5 | Usage tracking and fallback end to end | done |
 | 6 | Streaming | pending |
 | 7 | Dockerfile, Compose app service, final test run | pending |
 
-The available routes are `GET /health` and non-streaming `POST /v1/chat/completions`. Usage persistence,
-fallback request bodies, and SSE streaming land in phases 5 and 6.
+The available routes are `GET /health` and non-streaming `POST /v1/chat/completions`, with `models`
+fallback and usage persistence. SSE streaming lands in phase 6.
 
 ## Stack
 
@@ -86,9 +86,23 @@ Public model aliases resolve through the in-code registry to a provider and an u
 | `anthropic/claude-sonnet` | Anthropic |
 | `google/gemini-2.5-pro` | Google |
 
-Phase 4 accepts one `model`. The routing layer already supports two ordered attempts; the public `models`
-fallback request shape lands in phase 5. Fallback happens only on 429, 5xx, network errors, timeouts, and
-unconfigured providers. Validation errors, authentication errors, and safety refusals never fall back.
+Send `models` instead of `model` to request fallback. Exactly one of the two must be present.
+
+```json
+{
+  "models": ["anthropic/claude-sonnet", "openai/gpt-5"],
+  "messages": [{ "role": "user", "content": "Explain Kafka consumer groups" }]
+}
+```
+
+Up to two entries are tried in order; a third is rejected with 400 "Maximum of 2 models allowed". The
+response's `model` field names the alias that actually served. Fallback happens only on 429, 5xx, network
+errors, timeouts, and unconfigured providers. Validation errors, authentication errors, and safety refusals
+never fall back.
+
+Every request that reaches the chat service writes one row to `usage`: status `success`,
+`client_disconnect`, or `error:<code>`, with the alias that served or was last attempted. Requests rejected
+by authentication or body validation write no row.
 
 Every error, from any layer, has one shape:
 
@@ -121,8 +135,8 @@ Every error, from any layer, has one shape:
 | `npm run build` then `npm start` | Compile to `dist/` and run. |
 | `npm run typecheck` | Type-check without emitting. |
 | `npm test` | Unit tests (`src/**/*.spec.ts`). |
-| `npm run test:e2e` | Integration tests against the full app with mocked providers (from phase 4). |
-| `npm run test:db` | Tests against the Compose Postgres (from phase 5). |
+| `npm run test:e2e` | Integration tests against the full app with fake providers and mocked key and usage services. |
+| `npm run test:db` | Key and usage persistence against the Compose Postgres. Needs `DATABASE_URL`; skipped without it. |
 | `npm run migrate` | Apply migrations in `drizzle/`. |
 | `npm run db:generate` | Generate a new migration after editing `src/database/schema.ts`. |
 | `npm run key:create -- --name <name>` | Create an API key and print it once. |
@@ -145,8 +159,8 @@ src/
 ├── models/                 (phase 3) alias registry
 ├── providers/              LLMProvider contract, three adapters, ProviderRegistry
 ├── routing/                RoutingService, FallbackService
-├── chat/                   non-streaming controller, service, DTOs, response formatting
-└── usage/                  (phase 5) UsageService
+├── chat/                   controller, service (routing call, usage row, summary log), DTOs, formatting
+└── usage/                  UsageService: one row per request, never throws
 scripts/create-api-key.ts
 drizzle/                    committed SQL migrations
 docs/                       project spec and implementation plan

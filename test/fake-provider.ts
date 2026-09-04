@@ -39,8 +39,17 @@ export class FakeProvider implements LLMProvider {
 
   constructor(
     readonly name: ProviderName,
-    private readonly outcomes: FakeOutcome[],
+    private outcomes: FakeOutcome[],
   ) {}
+
+  /** Replaces the script, rewinds, and forgets earlier calls, so one instance can serve several tests. */
+  script(outcomes: FakeOutcome[]): this {
+    this.outcomes = outcomes;
+    this.cursor = 0;
+    this.calls.length = 0;
+    this.streamsClosed = 0;
+    return this;
+  }
 
   async chat(request: UnifiedChatRequest): Promise<UnifiedChatResponse> {
     this.calls.push(request);
