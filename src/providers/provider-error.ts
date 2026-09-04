@@ -25,6 +25,15 @@ const CONNECTION_CODES = new Set([
 const TIMEOUT_NAMES = new Set(['APIConnectionTimeoutError']);
 const CONNECTION_NAMES = new Set(['APIConnectionError', 'FetchError']);
 
+/**
+ * An upstream stream that closed without its terminal event (finish reason,
+ * stop reason) was cut off, not completed. Retryable: before the first chunk it
+ * triggers fallback; after commit it becomes an SSE error frame instead of [DONE].
+ */
+export function truncatedStream(provider: string): RouterError {
+  return new RouterError(ErrorCode.PROVIDER_UNAVAILABLE, 'Upstream stream ended before completion', { provider });
+}
+
 /** Maps SDK/HTTP failures into the router's provider-neutral error vocabulary. */
 export function mapProviderError(error: unknown): RouterError {
   if (error instanceof RouterError) return error;

@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import type { LLMProvider } from '../llm-provider.interface';
-import { mapProviderError } from '../provider-error';
+import { mapProviderError, truncatedStream } from '../provider-error';
 import type { FinishReason, UnifiedChatRequest, UnifiedChatResponse, UnifiedStreamChunk, UnifiedUsage } from '../unified.types';
 import { fromGoogleResponse, mapGoogleFinishReason, toGoogleRequest } from './google.mapper';
 
@@ -29,7 +29,7 @@ export class GoogleProvider implements LLMProvider {
         ...params,
         config: { ...params.config, abortSignal: request.signal },
       });
-      let finishReason: FinishReason = 'stop';
+      let finishReason: FinishReason | undefined;
       let usage: UnifiedUsage | null = null;
       for await (const chunk of stream) {
         if (chunk.text) yield { type: 'delta', text: chunk.text };
@@ -43,6 +43,8 @@ export class GoogleProvider implements LLMProvider {
           usage = { promptTokens, completionTokens, totalTokens: metadata.totalTokenCount ?? promptTokens + completionTokens };
         }
       }
+      // The final Gemini chunk carries finishReason; a stream that ends without one was cut off upstream.
+      if (finishReason === undefined) throw truncatedStream('google');
       yield { type: 'finish', finishReason, usage };
     } catch (error) {
       throw mapProviderError(error);

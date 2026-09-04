@@ -1,4 +1,26 @@
 services:
+  app:
+    build: .
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://myrouter:myrouter@postgres:5432/myrouter
+      # Provider keys are read from the shell or a .env file next to this compose file.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      OPENAI_MODEL_ID: ${OPENAI_MODEL_ID:-}
+      ANTHROPIC_MODEL_ID: ${ANTHROPIC_MODEL_ID:-}
+      GOOGLE_MODEL_ID: ${GOOGLE_MODEL_ID:-}
+      PROVIDER_TIMEOUT_MS: ${PROVIDER_TIMEOUT_MS:-}
+      STREAM_FIRST_CHUNK_TIMEOUT_MS: ${STREAM_FIRST_CHUNK_TIMEOUT_MS:-}
+      STREAM_IDLE_TIMEOUT_MS: ${STREAM_IDLE_TIMEOUT_MS:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -6,7 +28,7 @@ services:
       POSTGRES_PASSWORD: myrouter
       POSTGRES_DB: myrouter
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

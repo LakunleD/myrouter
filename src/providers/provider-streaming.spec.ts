@@ -21,6 +21,43 @@ async function collect(source: AsyncIterable<UnifiedStreamChunk>): Promise<Unifi
   return result;
 }
 
+describe('truncated upstream streams', () => {
+  const truncated = expect.objectContaining({ code: 'provider_unavailable', retryable: true, message: 'Upstream stream ended before completion' });
+
+  it('OpenAI: a stream that ends without finish_reason is an error, not a completion', async () => {
+    const create = jest.fn().mockResolvedValue(iterable([{ choices: [{ delta: { content: 'partial' }, finish_reason: null }] }]));
+    const provider = new OpenAIProvider({ chat: { completions: { create } } } as unknown as OpenAI);
+    const received: UnifiedStreamChunk[] = [];
+    await expect(
+      (async () => {
+        for await (const chunk of provider.stream(request)) received.push(chunk);
+      })(),
+    ).rejects.toEqual(truncated);
+    expect(received).toEqual([{ type: 'delta', text: 'partial' }]);
+  });
+
+  it('Anthropic: a stream that ends without message_delta is an error', async () => {
+    const create = jest.fn().mockResolvedValue(iterable([
+      { type: 'message_start', message: { usage: { input_tokens: 4 } } },
+      { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } },
+    ]));
+    const provider = new AnthropicProvider({ messages: { create } } as unknown as Anthropic);
+    await expect(collect(provider.stream(request))).rejects.toEqual(truncated);
+  });
+
+  it('Google: a stream that ends without finishReason is an error', async () => {
+    const generateContentStream = jest.fn().mockResolvedValue(iterable([{ text: 'partial', candidates: [{}] }]));
+    const provider = new GoogleProvider({ models: { generateContentStream } } as unknown as GoogleGenAI);
+    await expect(collect(provider.stream(request))).rejects.toEqual(truncated);
+  });
+
+  it('an empty upstream stream is also an error', async () => {
+    const create = jest.fn().mockResolvedValue(iterable([]));
+    const provider = new OpenAIProvider({ chat: { completions: { create } } } as unknown as OpenAI);
+    await expect(collect(provider.stream(request))).rejects.toEqual(truncated);
+  });
+});
+
 describe('provider streaming adapters', () => {
   it('maps OpenAI deltas, finish reason, and final usage', async () => {
     const create = jest.fn().mockResolvedValue(iterable([

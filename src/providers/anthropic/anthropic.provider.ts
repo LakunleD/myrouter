@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { LLMProvider } from '../llm-provider.interface';
-import { mapProviderError } from '../provider-error';
+import { mapProviderError, truncatedStream } from '../provider-error';
 import type { FinishReason, UnifiedChatRequest, UnifiedChatResponse, UnifiedStreamChunk } from '../unified.types';
 import { fromAnthropicResponse, mapAnthropicFinishReason, toAnthropicRequest, toAnthropicStreamRequest } from './anthropic.mapper';
 
@@ -23,7 +23,7 @@ export class AnthropicProvider implements LLMProvider {
       const stream = await this.client.messages.create(toAnthropicStreamRequest(request), { signal: request.signal });
       let inputTokens = 0;
       let outputTokens = 0;
-      let finishReason: FinishReason = 'stop';
+      let finishReason: FinishReason | undefined;
       for await (const event of stream) {
         if (event.type === 'message_start') inputTokens = event.message.usage.input_tokens;
         if (event.type === 'content_block_delta' && event.delta.type === 'text_delta' && event.delta.text) {
@@ -34,6 +34,8 @@ export class AnthropicProvider implements LLMProvider {
           finishReason = mapAnthropicFinishReason(event.delta.stop_reason);
         }
       }
+      // message_delta carries the stop reason; a stream that ends without it was cut off upstream.
+      if (finishReason === undefined) throw truncatedStream('anthropic');
       yield {
         type: 'finish',
         finishReason,

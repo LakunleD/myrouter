@@ -1,6 +1,6 @@
 import type OpenAI from 'openai';
 import type { LLMProvider } from '../llm-provider.interface';
-import { mapProviderError } from '../provider-error';
+import { mapProviderError, truncatedStream } from '../provider-error';
 import type { FinishReason, UnifiedChatRequest, UnifiedChatResponse, UnifiedStreamChunk, UnifiedUsage } from '../unified.types';
 import { fromOpenAIResponse, mapOpenAIFinishReason, toOpenAIRequest, toOpenAIStreamRequest } from './openai.mapper';
 
@@ -21,7 +21,7 @@ export class OpenAIProvider implements LLMProvider {
   async *stream(request: UnifiedChatRequest): AsyncIterable<UnifiedStreamChunk> {
     try {
       const stream = await this.client.chat.completions.create(toOpenAIStreamRequest(request), { signal: request.signal });
-      let finishReason: FinishReason = 'stop';
+      let finishReason: FinishReason | undefined;
       let usage: UnifiedUsage | null = null;
       for await (const chunk of stream) {
         const choice = chunk.choices[0];
@@ -37,6 +37,7 @@ export class OpenAIProvider implements LLMProvider {
           };
         }
       }
+      if (finishReason === undefined) throw truncatedStream('openai');
       yield { type: 'finish', finishReason, usage };
     } catch (error) {
       throw mapProviderError(error);

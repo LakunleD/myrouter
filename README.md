@@ -14,7 +14,7 @@ Design and build order live in [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION
 | 4 | Provider adapters and the chat endpoint (non-streaming) | done |
 | 5 | Usage tracking and fallback end to end | done |
 | 6 | Streaming | done |
-| 7 | Dockerfile, Compose app service, final test run | pending |
+| 7 | Dockerfile, Compose app service, final test run | done |
 
 The available routes are `GET /health` and `POST /v1/chat/completions`, with `model` or ordered `models`
 fallback, usage persistence, and SSE streaming via `"stream": true`.
@@ -23,20 +23,43 @@ fallback, usage persistence, and SSE streaming via `"stream": true`.
 
 TypeScript, NestJS 11 on the default Express platform, PostgreSQL 16, Drizzle ORM, Jest, Docker Compose. Provider calls use the official `openai`, `@anthropic-ai/sdk`, and `@google/genai` SDKs with their built-in retries disabled, so the router's fallback loop is the only retry policy.
 
-## Quick start
+## Quick start with Docker Compose
 
-Requires Node 22 or newer and Docker.
+Requires Docker. Provider keys are read from your shell or from a `.env` file next to `docker-compose.yml`.
+
+```bash
+cp .env.example .env            # fill in the provider keys you want to enable
+docker compose up -d --build
+docker compose exec app node dist/scripts/create-api-key.js --name "local dev"
+```
+
+The `app` container applies the migrations and then starts the server, so a failed migration keeps it from serving traffic. The key script prints the plaintext key once. Only its SHA-256 hash is stored.
+
+The host port comes from `PORT` in your shell or `.env` and defaults to 3000. If something else already listens there, run `PORT=3210 docker compose up -d --build` and use that port in the commands below. The container itself always listens on 3000. Postgres is published on `POSTGRES_PORT`, default 5432, for local development; if that port is taken, set `POSTGRES_PORT` and update the port in `DATABASE_URL` to match. The timeout variables listed under Configuration are passed through to the container as well.
+
+Send a request:
+
+```bash
+curl -s localhost:3000/v1/chat/completions \
+  -H "Authorization: Bearer lr_..." \
+  -H "Content-Type: application/json" \
+  -d '{"model":"anthropic/claude-sonnet","messages":[{"role":"user","content":"Say hello"}]}'
+```
+
+Add `"stream": true` for an event stream, or send `"models": [...]` for fallback. See Public API below.
+
+## Local development
+
+Requires Node 22 or newer and Docker for Postgres.
 
 ```bash
 npm install
-cp .env.example .env            # fill in the provider keys you want to enable
+cp .env.example .env
 docker compose up -d postgres
 npm run migrate
 npm run key:create -- --name "local dev"
 npm run start:dev
 ```
-
-The key script prints the plaintext key once. Only its SHA-256 hash is stored.
 
 Check it is up:
 
@@ -178,21 +201,48 @@ Two tables, created by `drizzle/0000_init.sql`.
 
 Prompts and completions are never stored or logged.
 
-## Verifying the current build
+## Docker
+
+`Dockerfile` is a two-stage build: compile with dev dependencies, then copy `dist/`, production `node_modules`, and `drizzle/` into a `node:22-alpine` image that runs as the `node` user. The container healthcheck polls `/health`. `docker-compose.yml` starts `app` and `postgres`; `app` waits for the Postgres healthcheck, runs the migrations, then starts.
+
+Useful commands:
 
 ```bash
-npm run typecheck && npm test
-docker compose up -d postgres
-export DATABASE_URL=postgres://myrouter:myrouter@localhost:5432/myrouter
-npm run migrate
-npm run key:create -- --name check
-docker compose exec postgres psql -U myrouter -d myrouter -c 'select name, length(key_hash) from api_keys;'
-npm run start:dev &
-curl -i localhost:3000/health
-curl -s localhost:3000/does-not-exist
+docker compose up -d --build          # build and start both services
+docker compose logs -f app            # request summary lines, fallbacks, errors
+docker compose exec app node dist/scripts/create-api-key.js --name ci
+docker compose exec postgres psql -U myrouter -d myrouter -c 'select model, provider, status, latency_ms from usage order by created_at desc limit 5;'
+docker compose down                   # add -v to drop the database volume
 ```
 
-Expect: no type errors, all unit tests green, "Migrations applied", a key row with a 64-character hash, a 200 from `/health` with an `x-request-id` header, and a normalized `invalid_request` body from the unknown route.
+## Verification
+
+Automated, no credentials needed:
+
+```bash
+npm run typecheck
+npm test                              # unit
+npm run test:e2e                      # full app, fake providers
+DATABASE_URL=postgres://myrouter:myrouter@localhost:5432/myrouter npm run test:db
+```
+
+The e2e suite covers authentication, validation, routing to each provider, fallback and no-fallback rules, usage records, streaming frames, pre-commit and post-commit streaming failures, and client disconnect.
+
+Against real providers, with keys in `.env` and the stack up via Compose:
+
+```bash
+KEY=$(docker compose exec app node dist/scripts/create-api-key.js --name manual | tail -1)
+H=(-H "Authorization: Bearer $KEY" -H "Content-Type: application/json")
+M='"messages":[{"role":"user","content":"Reply with one word."}]'
+
+curl -s localhost:3000/v1/chat/completions "${H[@]}" -d "{\"model\":\"openai/gpt-5\",$M}"
+curl -s localhost:3000/v1/chat/completions "${H[@]}" -d "{\"model\":\"anthropic/claude-sonnet\",$M}"
+curl -s localhost:3000/v1/chat/completions "${H[@]}" -d "{\"model\":\"google/gemini-2.5-pro\",$M}"
+curl -sN localhost:3000/v1/chat/completions "${H[@]}" -d "{\"model\":\"anthropic/claude-sonnet\",\"stream\":true,$M}"
+curl -s localhost:3000/v1/chat/completions "${H[@]}" -d "{\"models\":[\"google/gemini-2.5-pro\",\"openai/gpt-5\"],$M}"
+```
+
+Expect an OpenAI-shaped completion from each of the first three with `usage` populated, a `text/event-stream` response ending in `data: [DONE]` from the fourth, and a completion whose `model` field names whichever alias served from the fifth. To see fallback, leave one provider's key unset and put it first in `models`. Each call adds a row to `usage`. Any OpenAI-compatible client pointed at `http://localhost:3000/v1` with the key as its API key works the same way.
 
 ## Principles
 
